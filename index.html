@@ -1,0 +1,102 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>连连看</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);min-height:100vh;display:flex;justify-content:center;align-items:center;user-select:none}
+.game-container{background:rgba(255,255,255,.08);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:20px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.toolbar{display:flex;align-items:center;gap:16px;padding:0 4px 16px 4px;color:#e0e0e0;font-size:14px;flex-wrap:wrap}
+.toolbar .stat{display:flex;align-items:center;gap:4px;font-variant-numeric:tabular-nums}
+.toolbar .stat-label{color:#90a0b8;font-size:12px}
+.toolbar .stat-value{color:#fff;font-weight:600;min-width:28px}
+.toolbar-buttons{display:flex;gap:8px;margin-left:auto}
+.btn{padding:6px 14px;border:1px solid rgba(255,255,255,.15);border-radius:8px;background:rgba(255,255,255,.06);color:#d0d8e8;font-size:13px;cursor:pointer;transition:all .2s;white-space:nowrap}
+.btn:hover{background:rgba(255,255,255,.14);color:#fff}
+.btn:active{transform:scale(.96)}
+.btn.primary{background:rgba(99,179,237,.2);border-color:rgba(99,179,237,.3)}
+.btn.primary:hover{background:rgba(99,179,237,.35)}
+.btn.warning{background:rgba(237,173,99,.2);border-color:rgba(237,173,99,.3)}
+.btn.warning:hover{background:rgba(237,173,99,.35)}
+.btn.danger{background:rgba(237,107,99,.2);border-color:rgba(237,107,99,.3)}
+.btn.danger:hover{background:rgba(237,107,99,.35)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.board-wrapper{position:relative;padding:28px;border-radius:12px;overflow:visible}
+#board{display:grid;grid-template-columns:repeat(12,1fr);grid-template-rows:repeat(8,1fr);gap:4px;padding:4px;position:relative}
+.tile{aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:26px;background:rgba(255,255,255,.10);border-radius:8px;cursor:pointer;transition:all .15s;box-shadow:0 2px 8px rgba(0,0,0,.2);border:2px solid transparent;position:relative}
+.tile:hover{background:rgba(255,255,255,.18);transform:scale(1.04);z-index:2}
+.tile.selected{border-color:#4a9eff;background:rgba(74,158,255,.2);transform:scale(1.06);box-shadow:0 0 16px rgba(74,158,255,.4);z-index:2}
+.tile.hint{animation:hintPulse .6s ease-in-out infinite alternate;border-color:#ff9800;z-index:2}
+@keyframes hintPulse{from{box-shadow:0 0 8px rgba(255,152,0,.4)}to{box-shadow:0 0 20px rgba(255,152,0,.8)}}
+.tile.empty{visibility:hidden;pointer-events:none}
+.tile.matched{animation:matchPop .3s ease-out forwards}
+@keyframes matchPop{0%{transform:scale(1.1);opacity:1}100%{transform:scale(0);opacity:0}}
+#connectionCanvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10}
+.win-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);justify-content:center;align-items:center;z-index:100}
+.win-overlay.show{display:flex}
+.win-card{background:rgba(255,255,255,.12);border-radius:20px;padding:40px 48px;text-align:center;color:#fff;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.win-card h2{font-size:32px;margin-bottom:12px}
+.win-card p{font-size:18px;color:#b0c0d8;margin-bottom:24px;line-height:1.6}
+.win-card .btn{font-size:15px;padding:10px 28px}
+</style>
+</head>
+<body>
+<div class="game-container">
+<div class="toolbar">
+<div class="stat"><span class="stat-label">⏱</span><span class="stat-value" id="timerDisplay">00:00</span></div>
+<div class="stat"><span class="stat-label">🏆</span><span class="stat-value" id="scoreDisplay">0</span></div>
+<div class="stat"><span class="stat-label">🔀</span><span class="stat-value" id="shuffleDisplay">0</span></div>
+<div class="toolbar-buttons">
+<button class="btn warning" id="hintBtn">💡提示</button>
+<button class="btn primary" id="shuffleBtn">🔀洗牌</button>
+<button class="btn danger" id="restartBtn">🔄重新开始</button>
+</div>
+</div>
+<div class="board-wrapper">
+<div id="board"></div>
+<canvas id="connectionCanvas"></canvas>
+</div>
+</div>
+<div class="win-overlay" id="winOverlay">
+<div class="win-card">
+<h2>🎉 恭喜通关！</h2>
+<p id="winStats"></p>
+<button class="btn primary" id="playAgainBtn">🔄再来一局</button>
+</div>
+</div>
+<script>
+const ROWS=8,COLS=12;
+const ANIMALS=['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🐔'];
+const TILE_COUNT=ROWS*COLS;
+const PADDING=4,GAP=4;
+let board=[],selected=null,timerInterval=null,seconds=0,score=0,shuffleCount=0,hintCooldown=false,isAnimating=false,gameActive=false,gameEnded=false;
+let audioCtx=null;
+function getAudioCtx(){if(!audioCtx){const C=window.AudioContext||window.webkitAudioContext;audioCtx=new C}return audioCtx}
+function playClick(){try{const c=getAudioCtx(),o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.type='sine';o.frequency.value=660;g.gain.value=.08;o.start();o.stop(c.currentTime+.08)}catch(e){}}
+function playMatch(){try{const c=getAudioCtx(),o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.type='sine';o.frequency.value=523;g.gain.value=.1;o.start();g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.3);o.stop(c.currentTime+.3);setTimeout(()=>{try{const o2=c.createOscillator(),g2=c.createGain();o2.connect(g2);g2.connect(c.destination);o2.type='sine';o2.frequency.value=784;g2.gain.value=.08;o2.start();g2.gain.exponentialRampToValueAtTime(.001,c.currentTime+.2);o2.stop(c.currentTime+.2)}catch(e){}},100)}catch(e){}}
+function playShuffle(){try{const c=getAudioCtx();for(let i=0;i<3;i++){setTimeout(()=>{try{const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.type='triangle';o.frequency.value=400+i*100;g.gain.value=.06;o.start();o.stop(c.currentTime+.08)}catch(e){}},i*80)}}catch(e){}}
+function playWin(){try{const c=getAudioCtx(),t=c.currentTime;const notes=[523,659,784,1047];notes.forEach((f,i)=>{const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.type='sine';o.frequency.value=f;g.gain.value=.1;o.start(t+i*.15);g.gain.exponentialRampToValueAtTime(.001,t+i*.15+.4);o.stop(t+i*.15+.4)})}catch(e){}}
+function initGame(){board=Array.from({length:ROWS+2},()=>Array(COLS+2).fill(0));const pool=[];const pairs=TILE_COUNT/2;for(let i=0;i<pairs;i++){const type=(i%ANIMALS.length)+1;pool.push(type,type)}for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]]}let idx=0;for(let r=1;r<=ROWS;r++){for(let c=1;c<=COLS;c++){board[r][c]=pool[idx++]}}selected=null;score=0;shuffleCount=0;seconds=0;gameActive=true;gameEnded=false;clearCanvas();document.getElementById('winOverlay').classList.remove('show');stopTimer();updateDisplays();renderBoard();startTimer()}
+function clearCanvas(){const canvas=document.getElementById('connectionCanvas');const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height)}
+function getCellCenter(r,c){const boardEl=document.getElementById('board');const wrapperEl=document.querySelector('.board-wrapper');const wr=wrapperEl.getBoundingClientRect();const br=boardEl.getBoundingClientRect();const bw=boardEl.clientWidth,bh=boardEl.clientHeight;const cw=(bw-2*PADDING-(COLS-1)*GAP)/COLS;const ch=(bh-2*PADDING-(ROWS-1)*GAP)/ROWS;const tx=PADDING+(c-1)*(cw+GAP)+cw/2;const ty=PADDING+(r-1)*(ch+GAP)+ch/2;return{x:(br.left-wr.left)+tx,y:(br.top-wr.top)+ty}}
+function drawPath(path){const canvas=document.getElementById('connectionCanvas');const wrapper=document.querySelector('.board-wrapper');const wr=wrapper.getBoundingClientRect();canvas.width=wr.width;canvas.height=wr.height;const ctx=canvas.getContext('2d');const pts=path.map(p=>getCellCenter(p.r,p.c));const duration=400;const start=performance.now();const os=4;function anim(t){const e=t-start;const a=Math.max(0,1-e/duration);ctx.clearRect(0,0,canvas.width,canvas.height);if(a>0){ctx.save();ctx.shadowColor='rgba(255,215,0,'+(a*.5)+')';ctx.shadowBlur=12;ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.strokeStyle='rgba(255,215,0,'+a+')';ctx.lineWidth=4+os*(1-a);ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();ctx.restore();requestAnimationFrame(anim)}}requestAnimationFrame(anim)}
+function renderBoard(){const container=document.getElementById('board');container.innerHTML='';for(let r=1;r<=ROWS;r++){for(let c=1;c<=COLS;c++){const cell=document.createElement('div');cell.style.gridRow=r;cell.style.gridColumn=c;if(board[r][c]!==0){cell.className='tile';cell.textContent=ANIMALS[board[r][c]-1];cell.dataset.r=r;cell.dataset.c=c;cell.addEventListener('click',()=>handleTileClick(r,c));if(selected&&selected.r===r&&selected.c===c)cell.classList.add('selected')}else{cell.className='tile empty'}container.appendChild(cell)}}checkGameEnd()}
+function checkGameEnd(){if(gameEnded)return;let remaining=0;for(let r=1;r<=ROWS;r++){for(let c=1;c<=COLS;c++){if(board[r][c]!==0)remaining++}}if(remaining===0&&gameActive){gameEnded=true;gameActive=false;playWin();stopTimer();const m=Math.floor(seconds/60),s=seconds%60;document.getElementById('winStats').textContent='用时 '+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')+'  ·  得分 '+score+'  ·  洗牌 '+shuffleCount+' 次';document.getElementById('winOverlay').classList.add('show')}}
+function handleTileClick(r,c){if(!gameActive||gameEnded||isAnimating)return;if(board[r][c]===0)return;if(selected===null){selected={r,c};renderBoard();playClick();return}if(selected.r===r&&selected.c===c){selected=null;renderBoard();return}const path=canConnect(selected.r,selected.c,r,c);if(path){playMatch();isAnimating=true;drawPath(path);const sr=selected.r,sc=selected.c,tr=r,tc=c;selected=null;board[sr][sc]=0;board[tr][tc]=0;score+=10;updateDisplays();setTimeout(()=>{renderBoard();isAnimating=false;checkAutoShuffle()},400)}else{selected={r,c};renderBoard();playClick()}}
+function checkAutoShuffle(){if(!gameActive||gameEnded)return;let remaining=0;for(let r=1;r<=ROWS;r++){for(let c=1;c<=COLS;c++){if(board[r][c]!==0)remaining++}}if(remaining===0)return;for(let r1=1;r1<=ROWS;r1++){for(let c1=1;c1<=COLS;c1++){if(board[r1][c1]===0)continue;for(let r2=r1;r2<=ROWS;r2++){for(let c2=(r2===r1?c1+1:1);c2<=COLS;c2++){if(board[r2][c2]===0)continue;if(board[r1][c1]===board[r2][c2]&&canConnect(r1,c1,r2,c2)){return}}}}}shuffleBoard();playShuffle();shuffleCount++;updateDisplays();renderBoard()}
+function shuffleBoard(){const tiles=[];for(let r=1;r<=ROWS;r++){for(let c=1;c<=COLS;c++){if(board[r][c]!==0){tiles.push(board[r][c])}}}for(let i=tiles.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[tiles[i],tiles[j]]=[tiles[j],tiles[i]]}let idx=0;for(let r=1;r<=ROWS;r++){for(let c=1;c<=COLS;c++){if(board[r][c]!==0){board[r][c]=tiles[idx++]}}}selected=null;clearCanvas()}
+function isLineClear(r1,c1,r2,c2){if(r1===r2&&c1===c2)return true;if(r1===r2){const d=c2>c1?1:-1;for(let c=c1+d;c!==c2;c+=d){if(board[r1][c]!==0)return false}return true}if(c1===c2){const d=r2>r1?1:-1;for(let r=r1+d;r!==r2;r+=d){if(board[r][c1]!==0)return false}return true}return false}
+function canConnect(r1,c1,r2,c2){if(board[r1][c1]!==board[r2][c2]||board[r1][c1]===0)return null;if(isLineClear(r1,c1,r2,c2))return[{r:r1,c:c1},{r:r2,c:c2}];if(board[r1][c2]===0&&isLineClear(r1,c1,r1,c2)&&isLineClear(r1,c2,r2,c2))return[{r:r1,c:c1},{r:r1,c:c2},{r:r2,c:c2}];if(board[r2][c1]===0&&isLineClear(r1,c1,r2,c1)&&isLineClear(r2,c1,r2,c2))return[{r:r1,c:c1},{r:r2,c:c1},{r:r2,c:c2}];for(let i=0;i<=COLS+1;i++){if(i===c1||i===c2)continue;if(board[r1][i]===0&&board[r2][i]===0&&isLineClear(r1,c1,r1,i)&&isLineClear(r1,i,r2,i)&&isLineClear(r2,i,r2,c2)){return[{r:r1,c:c1},{r:r1,c:i},{r:r2,c:i},{r:r2,c:c2}]}}for(let j=0;j<=ROWS+1;j++){if(j===r1||j===r2)continue;if(board[j][c1]===0&&board[j][c2]===0&&isLineClear(r1,c1,j,c1)&&isLineClear(j,c1,j,c2)&&isLineClear(j,c2,r2,c2)){return[{r:r1,c:c1},{r:j,c:c1},{r:j,c:c2},{r:r2,c:c2}]}}return null}
+function findHint(){for(let r1=1;r1<=ROWS;r1++){for(let c1=1;c1<=COLS;c1++){if(board[r1][c1]===0)continue;for(let r2=r1;r2<=ROWS;r2++){for(let c2=r2===r1?c1+1:1;c2<=COLS;c2++){if(board[r2][c2]===0)continue;if(board[r1][c1]===board[r2][c2]){const path=canConnect(r1,c1,r2,c2);if(path)return[{r:r1,c:c1},{r:r2,c:c2}]}}}}}return null}
+function showHint(){if(hintCooldown||!gameActive||gameEnded)return;const pair=findHint();if(!pair){let hasRemaining=false;for(let r=1;r<=ROWS&&!hasRemaining;r++){for(let c=1;c<=COLS&&!hasRemaining;c++){if(board[r][c]!==0)hasRemaining=true}}if(hasRemaining){shuffleBoard();playShuffle();shuffleCount++;updateDisplays();renderBoard();setTimeout(()=>{const p2=findHint();if(p2)highlightHint(p2)},300)}return}highlightHint(pair)}
+function highlightHint(pair){const tiles=document.querySelectorAll('.tile:not(.empty)');tiles.forEach(t=>{const r=parseInt(t.dataset.r),c=parseInt(t.dataset.c);if((r===pair[0].r&&c===pair[0].c)||(r===pair[1].r&&c===pair[1].c)){t.classList.add('hint')}});hintCooldown=true;document.getElementById('hintBtn').disabled=true;setTimeout(()=>{tiles.forEach(t=>t.classList.remove('hint'));hintCooldown=false;document.getElementById('hintBtn').disabled=false},3000)}
+function updateDisplays(){document.getElementById('scoreDisplay').textContent=score;document.getElementById('shuffleDisplay').textContent=shuffleCount}
+function updateTimer(){seconds++;const m=Math.floor(seconds/60),s=seconds%60;document.getElementById('timerDisplay').textContent=String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')}
+function startTimer(){stopTimer();seconds=0;document.getElementById('timerDisplay').textContent='00:00';timerInterval=setInterval(updateTimer,1000)}
+function stopTimer(){if(timerInterval){clearInterval(timerInterval);timerInterval=null}}
+document.addEventListener('DOMContentLoaded',()=>{initGame();document.getElementById('shuffleBtn').addEventListener('click',()=>{if(!gameActive||gameEnded)return;shuffleBoard();playShuffle();shuffleCount++;updateDisplays();renderBoard()});document.getElementById('hintBtn').addEventListener('click',showHint);document.getElementById('restartBtn').addEventListener('click',initGame);document.getElementById('playAgainBtn').addEventListener('click',initGame);window.addEventListener('resize',()=>{if(!gameEnded)clearCanvas()})});
+</script>
+</body>
+</html>
